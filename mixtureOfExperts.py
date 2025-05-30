@@ -18,3 +18,14 @@ torch.manual_seed(42)
 # vocab_size = len(chars)
 
    
+#Epert module
+class Expert(nn.Module):
+    # An MLP is a simple liear layer followed by a non-linearity i.e. each Expert
+    def __init__(self, n_embd):
+        super().__init__()
+        self.net = nn.Sequential( # hold the actual layers, nn.Sequential stacks layers in order
+            nn.Linear(n_embd, 4* n_embd),
+            nn.ReLU(),
+            nn.Linear(4 * n_embd, n_embd),
+            nn.Dropout(dropout),
+        )
