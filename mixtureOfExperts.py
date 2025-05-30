@@ -54,5 +54,67 @@ top_k_logits, top_k_indices = logits.topk(top_k, dim=-1) # Get top-k experts
 print(top_k_logits, top_k_indices)
 # Now we replace the not selected values with negative infinity
 # And then we will apply softmax
+zeros = torch.full_like(logits, float('-inf')) # full_like clones a tensor and fill it will -infinity
+sparse_logits = zeros.scatter(-1, top_k_indices, top_k_logits)
+print(sparse_logits)
+gating_ouput = F.softmax(sparse_logits, dim=-1)
+print(gating_ouput)
 
+class TopkRouter(nn.Module):
+    def __init__(self, n_embed, num_experts, top_k):
+        super(TopkRouter, self).__init__()
+        self.top_k = top_k
+        self.linear = nn.Linear(n_embed, num_experts)
+
+    def forward(self, mh_ouput):
+        # is the output tensor from the multihead self attention block
+        logits = self.linear(mh_ouput)
+        top_k_logits, indices = logits.topk(self.top_k, dim=-1)
+        zeros = torch.full_like(logits, float('-inf'))
+        sparse_logits = zeros.scatter(-1, indices, top_k_logits)
+        router_output = F.softmax(sparse_logits, dim=-1)
+        return router_output, indices
+    
+# Testing
+num_experts = 3
+top_k = 2
+n_embd = 8
+mh_output = torch.randn(1, 4, n_embed) 
+top_k_gate = TopkRouter(n_embed, num_experts, top_k)
+gating_ouput, indices = top_k_gate(mh_output)
+print(gating_ouput.shape, gating_ouput, indices)
+
+# Create some noise
+
+class NoisyTopkRouter(nn.Module):
+    def __init__(self, n_embed, num_experts, top_k):
+        super(NoisyTopkRouter, self).__init__()
+        self.top_k = top_k
+        # layer for router logits
+        self.topkroute_linear = nn.Linear(n_embed, num_experts)
+        self.noise_linear = nn.Linear(n_embed, num_experts)
+    
+    def forward(self, mh_ouput):
+        # mh_output is the output tensor from multihead self attention block
+        logits = self.topkroute_linear(mh_ouput)
+
+        # Noise logits
+        noise_logits = self.noise_linear(mh_output)
+
+        # Adding scaled unit gaussian noise to the logits
+        noise = torch.randn_like(logits)*F.softplus(noise_logits)
+        noisy_logits = logits + noise
+        top_k_logits, indices = noisy_logits.topk(self.top_k, dim=-1)
+        zeros = torch.full_like(noisy_logits, float('-inf'))
+        sparse_logits = zeros.scatter(-1, indices, top_k_logits)
+        router_output = F.softmax(sparse_logits, dim=-1)
+        return router_output, indices
+    
+num_experts = 3
+top_k = 2
+n_embd = 8
+mh_output = torch.randn(1, 4, n_embed) 
+top_k_gate = NoisyTopkRouter(n_embed, num_experts, top_k)
+gating_ouput, indices = top_k_gate(mh_output)
+print(gating_ouput.shape, gating_ouput, indices)
 
