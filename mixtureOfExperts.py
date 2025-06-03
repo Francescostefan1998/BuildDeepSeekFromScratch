@@ -156,10 +156,52 @@ class SparseMoE(nn.Module):
     
 num_experts = 3
 top_k = 2
-n_embd = 8
+n_embed = 8
 dropout=0.1
-mh_output = torch.randn(1, 4, n_embd) 
-sparse_moe = SparseMoE(n_embd, num_experts, top_k)
+mh_output = torch.randn(1, 4, n_embed) 
+sparse_moe = SparseMoE(n_embed, num_experts, top_k)
 final_output = sparse_moe(mh_output)
 print("Shape of the final output:", final_output.shape)
 print(final_output)
+
+class Head(nn.Module):
+    # one head of self attention
+
+    def __init__(self, head_size):
+        super().__init__()
+        self.key = nn.Linear(n_embed, head_size, bias=False)
+        self.query = nn.Linear(n_embed, head_size, bias=False)
+        self.value = nn.Linear(n_embed, head_size, bias=False)
+        self.register_buffer('tril', torch.tril(torch.ones(block_size, block_size)))
+        self.dropout = nn.Dropout(dropout)
+
+    def forward(self, x):
+        B,T,C = x.shape
+        k = self.key(x)
+        q = self.query(x)
+        # Compute attention score
+        wei = q @ k.transpose(-2, -1) * C**-0.5 
+        wei = wei.masked_fill(self.tril[:T, :T] == 0, float('-inf'))
+        wei = F.softmax(wei, dim=-1)
+        wei = self.dropout(wei)
+        # perform the weighted aggregation of the values
+        v = self.value(x)
+        out = wei @ v
+        return out
+    
+# Multi-Headed Self Attention
+class MultiHeadAttention(nn.Module):
+
+    # multiple heads of self-attention in parallel
+    def __init__(self, num_heads, head_size):
+        super().__init__()
+        self.heads = nn.ModuleList([Head(head_size) for _ in range(num_heads)])
+        self.proj = nn.Linear(n_embed, n_embed)
+        self.dropout = nn.Dropout(dropout)
+        
+    def forward(self, x):
+        out = torch.cat([h(x) for h in self.heads], dim=-1)
+        out = self.dropout(self.proj(out))
+        return out
+    
+
