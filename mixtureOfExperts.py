@@ -205,3 +205,78 @@ class MultiHeadAttention(nn.Module):
         return out
     
 
+# coding the transformer block
+class Block(nn.Module):
+    # Mixture of Expert transformer block
+    def __init__(self, n_embed, n_head, num_expert, top_k):
+        # n_embed: embedding dimension, h_head: the number of heads we'd like
+        super().__init__()
+        head_size = n_embed // n_head
+        self.sa = MultiHeadAttention(n_head, head_size)
+        self.smoe = SparseMoE(n_embed, num_experts, top_k)
+        self.ln1 = nn.LayerNorm(n_embed)
+        self.ln2 = nn.LayerNorm(n_embed)
+
+    def forward(self, x):
+        # self attention
+        x = x + self.sa(self.ln1(x))
+        # sparse mixture of experts
+        x = x + self.smoe(self.ln2(x))
+        return x
+
+block_size = 128  # or whatever sequence length you want
+vocab_size = 65   # placeholder; set this after processing the dataset
+n_embed = 64      # embedding dimension
+n_head = 4        # number of attention heads
+num_experts = 3
+top_k = 2
+dropout = 0.1
+device = 'cuda' if torch.cuda.is_available() else 'cpu'
+
+# now we code the entire llmodel architecture
+class SparseMoELanguageModel(nn.Module):
+
+    def __init__(self):
+        super().__init__()
+        # each token directly reads off the logits for the next token from a lookup table
+        self.token_embedding_table = nn.Embedding(vocab_size, n_embed)
+        self.position_embedding_table = nn.Embedding(block_size, n_embed)
+        self.blocks = nn.Sequential(*[Block(n_embed, n_head=n_head, num_experts=num_experts, top_k=top_k) for _ in range()])
+        self.ln_f = nn.LayerNorm(n_embed) # final layer norm
+        self.lm_head = nn.Linear(n_embed, vocab_size)
+
+    def forward(self, idx, targets=None):
+        B,T = idx.shape
+        # idx and targets are both (B, T) tensor of integers
+        tok_emb = self.token_embedding_table(idx)
+        pos_emb = self.position_embedding_table(torch.arange(T, device=device))
+        x = tok_emb + pos_emb
+        x = self.blocks(x) # entire transformer block
+        x = self.ln_f(x) # for the output, this is the layer normalization
+        logits = self.lm_head(x) # from the embedding dimension to the vocabolary space
+
+        if targets is None:
+            loss = None
+        else:
+            B,T,C = logits.shape
+            logits = logits.view(B*T, C)
+            targets = targets.view(B*T)
+            loss = F.cross_entropy(logits, targets)
+
+        return logits, loss
+    
+    def genearate(self, idx, max_new_tokens):
+        
+        for _ in range(max_new_tokens):
+            # crop idx to the last block_size tokens
+            idx_cond = idx[:, -block_size:]
+            # get the predictions
+            logits, loss = self(idx_cond)
+            # focus only on the last time step
+            logits = logits[:, -1, :] # becomes (B, C)
+            # apply softmax to get probabilities
+            probs = F.softmax(logits, dim=-1) 
+            # sample from distribution
+            idx_next = torch.mulitnomial(probs, num_samples=1) # (B, 1)
+            idx = torch.cat((idx, idx_next),dim=1)
+        return idx
