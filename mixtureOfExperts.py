@@ -34,31 +34,31 @@ class Expert(nn.Module):
         return self.net(x)
     
 # Understanding how gating works
-num_experts = 3
-top_k = 2 # this is the number of expert that the router will choose
-n_embed = 8 # Embedding dimension
+# num_experts = 3
+# top_k = 2 # this is the number of expert that the router will choose
+# n_embed = 8 # Embedding dimension
 
-# Example multi-ead atttention output for a simple illustrative example, consider n_embed=32, context_length = 4
-mh_output = torch.randn(1, 4, n_embed) # pretending the ouput from a multihead attention, the 1 is the batch size, 4 is the number of tokens
+# # Example multi-ead atttention output for a simple illustrative example, consider n_embed=32, context_length = 4
+# mh_output = torch.randn(1, 4, n_embed) # pretending the ouput from a multihead attention, the 1 is the batch size, 4 is the number of tokens
 
-# maps from n_embed to num_expert
-# The following will actually be my router matrix
-topkgate_linear = nn.Linear(n_embed, num_experts) # nn.Linear(32, 4)
+# # maps from n_embed to num_expert
+# # The following will actually be my router matrix
+# topkgate_linear = nn.Linear(n_embed, num_experts) # nn.Linear(32, 4)
 
-# generating score , Expert selector matrix
-# the logits will likely be used later to pick the top-k experts for each token
-logits = topkgate_linear(mh_output) # this will perform the matrix multiplication to get e1, e2, e3
-print(logits)
-# implementing the top k load balancing
-top_k_logits, top_k_indices = logits.topk(top_k, dim=-1) # Get top-k experts
-print(top_k_logits, top_k_indices)
-# Now we replace the not selected values with negative infinity
-# And then we will apply softmax
-zeros = torch.full_like(logits, float('-inf')) # full_like clones a tensor and fill it will -infinity
-sparse_logits = zeros.scatter(-1, top_k_indices, top_k_logits)
-print(sparse_logits)
-gating_ouput = F.softmax(sparse_logits, dim=-1)
-print(gating_ouput)
+# # generating score , Expert selector matrix
+# # the logits will likely be used later to pick the top-k experts for each token
+# logits = topkgate_linear(mh_output) # this will perform the matrix multiplication to get e1, e2, e3
+# print(logits)
+# # implementing the top k load balancing
+# top_k_logits, top_k_indices = logits.topk(top_k, dim=-1) # Get top-k experts
+# print(top_k_logits, top_k_indices)
+# # Now we replace the not selected values with negative infinity
+# # And then we will apply softmax
+# zeros = torch.full_like(logits, float('-inf')) # full_like clones a tensor and fill it will -infinity
+# sparse_logits = zeros.scatter(-1, top_k_indices, top_k_logits)
+# print(sparse_logits)
+# gating_ouput = F.softmax(sparse_logits, dim=-1)
+# print(gating_ouput)
 
 class TopkRouter(nn.Module):
     def __init__(self, n_embed, num_experts, top_k):
@@ -76,13 +76,13 @@ class TopkRouter(nn.Module):
         return router_output, indices
     
 # Testing
-num_experts = 3
-top_k = 2
-n_embd = 8
-mh_output = torch.randn(1, 4, n_embed) 
-top_k_gate = TopkRouter(n_embed, num_experts, top_k)
-gating_ouput, indices = top_k_gate(mh_output)
-print(gating_ouput.shape, gating_ouput, indices)
+# num_experts = 3
+# top_k = 2
+# n_embd = 8
+# mh_output = torch.randn(1, 4, n_embed) 
+# top_k_gate = TopkRouter(n_embed, num_experts, top_k)
+# gating_ouput, indices = top_k_gate(mh_output)
+# print(gating_ouput.shape, gating_ouput, indices)
 
 # Create some noise
 
@@ -110,13 +110,13 @@ class NoisyTopkRouter(nn.Module):
         router_output = F.softmax(sparse_logits, dim=-1)
         return router_output, indices
     
-num_experts = 3
-top_k = 2
-n_embd = 8
-mh_output = torch.randn(1, 4, n_embed) 
-top_k_gate = NoisyTopkRouter(n_embed, num_experts, top_k)
-gating_ouput, indices = top_k_gate(mh_output)
-print(gating_ouput.shape, gating_ouput, indices)
+# num_experts = 3
+# top_k = 2
+# n_embd = 8
+# mh_output = torch.randn(1, 4, n_embed) 
+# top_k_gate = NoisyTopkRouter(n_embed, num_experts, top_k)
+# gating_ouput, indices = top_k_gate(mh_output)
+# print(gating_ouput.shape, gating_ouput, indices)
 
 # sparse mixture of experct module
 
@@ -124,7 +124,7 @@ class SparseMoE(nn.Module):
     def __init__(self, n_embed, num_experts, top_k):
         super(SparseMoE, self).__init__()
         self.router = NoisyTopkRouter(n_embed, num_experts, top_k)
-        self.experts = nn.ModuleList([Expert(n_embed) for _ in range(num_experts)])
+        self.experts = nn.ModuleList([Expert(n_embed, 0.1) for _ in range(num_experts)])
         self.top_k = top_k
 
     def forward(self, x):
@@ -157,7 +157,9 @@ class SparseMoE(nn.Module):
 num_experts = 3
 top_k = 2
 n_embd = 8
-mh_output = torch.randn(1, 4, n_embed) 
-top_k_gate = NoisyTopkRouter(n_embed, num_experts, top_k)
-gating_ouput, indices = top_k_gate(mh_output)
-print(gating_ouput.shape, gating_ouput, indices)
+dropout=0.1
+mh_output = torch.randn(1, 4, n_embd) 
+sparse_moe = SparseMoE(n_embd, num_experts, top_k)
+final_output = sparse_moe(mh_output)
+print("Shape of the final output:", final_output.shape)
+print(final_output)
